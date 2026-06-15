@@ -276,6 +276,101 @@
     }
     .progress-text { font-size: 12px; color: var(--text2); font-family: var(--mono); }
 
+    /* ── Pipeline diagram ────────────────────────────────────────── */
+    #step-list {
+      width: 100%;
+      max-width: 420px;
+      margin-bottom: 12px;
+      text-align: left;
+    }
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      font-size: 13px;
+      font-family: var(--mono);
+    }
+    .step-icon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 28px;
+      flex-shrink: 0;
+    }
+    .step-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+      border: 2px solid var(--border2);
+      color: transparent;
+      background: transparent;
+      transition: background .2s, border-color .2s;
+    }
+    .step-connector {
+      width: 2px;
+      min-height: 10px;
+      flex: 1;
+      background: var(--border2);
+      margin: 2px 0;
+    }
+    .step-item:last-child .step-connector { display: none; }
+    .step-label-wrap {
+      padding: 1px 0 12px 10px;
+      color: var(--text3);
+      line-height: 1.4;
+      transition: color .2s;
+    }
+    .step-item:last-child .step-label-wrap { padding-bottom: 0; }
+
+    /* State: pending (default — already above) */
+    /* State: active */
+    .step-item.active .step-dot {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #000;
+      animation: stepPulse 1.1s ease-in-out infinite;
+    }
+    .step-item.active .step-label-wrap { color: var(--text); font-weight: 600; }
+    /* State: done */
+    .step-item.done .step-dot { border-color: var(--ins); background: var(--ins); color: #000; }
+    .step-item.done .step-connector { background: var(--ins); }
+    .step-item.done .step-label-wrap { color: var(--text2); }
+    /* State: error */
+    .step-item.error .step-dot { border-color: var(--del); background: var(--del); color: #fff; }
+    .step-item.error .step-label-wrap { color: var(--del); font-weight: 600; }
+
+    @keyframes stepPulse { 0%,100% { opacity:1; transform:scale(1) } 50% { opacity:.65; transform:scale(.88) } }
+
+    /* ── Log console ─────────────────────────────────────────────── */
+    #log-console {
+      width: 100%;
+      max-width: 560px;
+      height: 180px;
+      overflow-y: auto;
+      background: var(--surf);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 8px;
+      text-align: left;
+    }
+    .log-line { display: flex; gap: 10px; line-height: 1.55; }
+    .log-time { color: var(--text3); flex-shrink: 0; }
+    .log-msg  { color: var(--text2); }
+    .log-line.error   .log-msg { color: var(--del); font-weight: 600; }
+    .log-line.success .log-msg { color: var(--ins); }
+
     /* ── Review phase ────────────────────────────────────────────── */
     #phase-review { padding: 0; display: flex; flex-direction: column; }
     .review-header {
@@ -495,6 +590,71 @@
       padding: 1px 4px;
       font-weight: 700;
     }
+    /* User-edit colours — blue additions, yellow subtractions */
+    ins.user-ins {
+      background: rgba(59,130,246,.18);
+      color: #3b82f6;
+      text-decoration: none;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-weight: 700;
+    }
+    del.user-del {
+      background: rgba(234,179,8,.18);
+      color: #a16207;
+      text-decoration: none;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-weight: 700;
+    }
+    body.theme-light ins.user-ins { background: rgba(37,99,235,.12); color: #1d4ed8; }
+    body.theme-light del.user-del { background: rgba(161,98,7,.12);  color: #92400e; }
+
+    /* Edit button */
+    .seg-edit-btn {
+      background: none;
+      border: 1px solid var(--border2);
+      color: var(--text3);
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-left: auto;
+      transition: border-color .15s, color .15s;
+    }
+    .seg-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Inline edit panel */
+    .seg-edit-panel {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--surf2);
+    }
+    .seg-edit-textarea {
+      width: 100%;
+      background: var(--surf);
+      border: 1px solid var(--border2);
+      border-radius: var(--r);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12.5px;
+      padding: 8px 10px;
+      resize: vertical;
+      min-height: 56px;
+      line-height: 1.6;
+      outline: none;
+    }
+    .seg-edit-textarea:focus { border-color: var(--accent); }
+    .seg-edit-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+
+    /* User-edited badge variant */
+    .seg-badge.user-edited { background: rgba(59,130,246,.15); color: #3b82f6; }
+    body.theme-light .seg-badge.user-edited { background: rgba(37,99,235,.1); color: #1d4ed8; }
 
     /* ── Toast ───────────────────────────────────────────────────── */
     #toast-container {
@@ -603,6 +763,8 @@
         <div id="progress-fill" class="progress-fill"></div>
       </div>
       <p id="progress-text" class="progress-text">&nbsp;</p>
+      <div id="step-list"></div>
+      <div id="log-console"></div>
     </div>
   </main>
 
@@ -647,6 +809,7 @@ const S = {
   mediaFile: null,
   originalSegments: [],
   correctedSegments: [],
+  userEdits: {},        // {segmentIndex: userEditedText} — overlay on AI corrections
   mediaUrl: null,
   showAll: true,
   _mcObserver: null,
@@ -777,71 +940,205 @@ function renderDiffText(orig, corr) {
   return { origHtml, corrHtml, changed }
 }
 
-// ─── API Call ─────────────────────────────────────────────────────────────────
+// ─── Pipeline diagram ─────────────────────────────────────────────────────────
+
+const STEP_ICONS = { pending: '', active: '◉', done: '✓', error: '✗' }
+
+function renderPipeline(steps) {
+  const list = document.getElementById('step-list')
+  // Preserve any statuses already applied before a pipeline refresh
+  const prevStatus = {}
+  list.querySelectorAll('.step-item[data-id]').forEach(el => {
+    prevStatus[el.dataset.id] = [...el.classList].find(c => ['active','done','error'].includes(c))
+  })
+  list.innerHTML = steps.map(s => {
+    const st = s.status ?? prevStatus[s.id] ?? 'pending'
+    return `<div class="step-item ${st}" data-id="${escHtml(s.id)}">
+      <div class="step-icon">
+        <div class="step-dot">${escHtml(STEP_ICONS[st] ?? '')}</div>
+        <div class="step-connector"></div>
+      </div>
+      <div class="step-label-wrap">${escHtml(s.label)}</div>
+    </div>`
+  }).join('')
+}
+
+function updateStep(id, status) {
+  const el = document.querySelector(`#step-list .step-item[data-id="${id}"]`)
+  if (!el) return
+  el.className = `step-item ${status}`
+  const dot = el.querySelector('.step-dot')
+  if (dot) dot.textContent = STEP_ICONS[status] ?? ''
+}
+
+// ─── Log console ─────────────────────────────────────────────────────────────
+
+function clearLog() {
+  document.getElementById('log-console').innerHTML = ''
+  document.getElementById('step-list').innerHTML = ''
+}
+
+function addLog(message, level = 'info') {
+  const con  = document.getElementById('log-console')
+  const now  = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const line = document.createElement('div')
+  line.className = `log-line ${level}`
+  line.innerHTML = `<span class="log-time">${now}</span><span class="log-msg">${escHtml(message)}</span>`
+  con.appendChild(line)
+  con.scrollTop = con.scrollHeight
+}
+
+// ─── SSE stream reader ────────────────────────────────────────────────────────
+
+async function* readSSE(response) {
+  const reader  = response.body.getReader()
+  const decoder = new TextDecoder()
+  let   buffer  = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop()
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { yield JSON.parse(line.slice(6)) } catch {}
+      }
+    }
+  }
+}
+
+async function runCorrection(url, body) {
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  })
+  // Non-2xx before stream starts (e.g. 413 payload too large)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+
+  let segments = null
+  for await (const event of readSSE(res)) {
+    if (event.type === 'log') {
+      addLog(event.message, event.level ?? 'info')
+      document.getElementById('processing-status').textContent = event.message
+    } else if (event.type === 'progress') {
+      setProgress(event.pct, event.label)
+    } else if (event.type === 'pipeline') {
+      renderPipeline(event.steps)
+    } else if (event.type === 'step_start') {
+      updateStep(event.id, 'active')
+    } else if (event.type === 'step_done') {
+      updateStep(event.id, 'done')
+    } else if (event.type === 'step_error') {
+      updateStep(event.id, 'error')
+    } else if (event.type === 'result') {
+      segments = event.segments
+    } else if (event.type === 'error') {
+      throw new Error(event.message)
+    }
+  }
+  if (!segments) throw new Error('Server closed without returning a result')
+  return segments
+}
+
+// ─── Correction flows ─────────────────────────────────────────────────────────
+
 async function correctTranscript() {
   const { apiKey, baseUrl, model, glossary } = getSettings()
   if (!apiKey) { toast('API key required — open Settings', 'error'); showSettings(true); return }
 
   showPhase('processing')
-  setProgress(0, `Sending ${S.originalSegments.length} segments to Claude…`)
+  clearLog()
+  setProgress(0, 'Starting…')
+  addLog(`Starting text-only correction for ${S.originalSegments.length} segments…`)
 
   try {
-    const res = await fetch('/api/correct', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ segments: S.originalSegments, glossary, apiKey, baseUrl, model }),
+    S.correctedSegments = await runCorrection('/api/correct', {
+      segments: S.originalSegments, glossary, apiKey, baseUrl, model,
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-
-    S.correctedSegments = data.segments
-    setProgress(100, 'Done')
     setTimeout(() => showReview(), 300)
   } catch (err) {
+    addLog(err.message, 'error')
     toast(err.message, 'error')
     showPhase('upload')
   }
 }
 
 // ─── Diff Rendering ───────────────────────────────────────────────────────────
+
+function renderUserDiffText(orig, finalText) {
+  if (orig === finalText) return { origHtml: escHtml(orig), corrHtml: escHtml(finalText), changed: false }
+  const ops = wordDiff(orig, finalText)
+  let origHtml = '', corrHtml = '', changed = false
+  for (const { op, text } of ops) {
+    const t = escHtml(text)
+    if (op === '=') { origHtml += t; corrHtml += t }
+    else if (op === '-') { origHtml += `<del class="user-del">${t}</del>`; changed = true }
+    else { corrHtml += `<ins class="user-ins">${t}</ins>`; changed = true }
+  }
+  return { origHtml, corrHtml, changed }
+}
+
+function createSegmentCard(i) {
+  const orig = S.originalSegments[i]
+  const corr = S.correctedSegments[i] ?? orig
+  const hasUserEdit = i in S.userEdits
+  const finalText = hasUserEdit ? S.userEdits[i] : corr.text
+
+  const { origHtml, corrHtml, changed: isChanged } = hasUserEdit
+    ? renderUserDiffText(orig.text, finalText)
+    : renderDiffText(orig.text, finalText)
+
+  const isVisible = isChanged || hasUserEdit
+  const badgeClass = hasUserEdit ? 'user-edited' : isChanged ? 'changed' : 'unchanged'
+  const badgeText  = hasUserEdit ? 'edited'       : isChanged ? 'changed' : 'same'
+  const timeDisplay = orig.timecode.replace(' --> ', ' → ')
+
+  const card = document.createElement('div')
+  card.className = `seg-card ${isVisible ? 'changed' : 'unchanged'}`
+  card.id = `seg-${i}`
+  if (!isVisible && !S.showAll) card.style.display = 'none'
+
+  card.innerHTML = `
+    <div class="seg-header">
+      <span class="seg-num">${escHtml(orig.index)}</span>
+      <span class="seg-time">${escHtml(timeDisplay)}</span>
+      <span class="seg-badge ${badgeClass}">${badgeText}</span>
+      <button class="seg-edit-btn" title="Edit segment">✎</button>
+    </div>
+    <div class="seg-body">
+      <div class="seg-original">${origHtml}</div>
+      <div class="seg-corrected">${corrHtml}</div>
+    </div>
+    <div class="seg-edit-panel hidden">
+      <textarea class="seg-edit-textarea" rows="3">${escHtml(finalText)}</textarea>
+      <div class="seg-edit-actions">
+        <button class="seg-cancel-btn btn-ghost">Cancel</button>
+        <button class="seg-save-btn btn-primary">Save</button>
+      </div>
+    </div>`
+
+  return card
+}
+
 function renderDiff() {
   const list = document.getElementById('diff-list')
   list.innerHTML = ''
-
-  const changed = []
   const frags = []
-
-  for (let i = 0; i < S.originalSegments.length; i++) {
-    const orig = S.originalSegments[i]
-    const corr = S.correctedSegments[i] ?? orig
-    const { origHtml, corrHtml, changed: isChanged } = renderDiffText(orig.text, corr.text)
-
-    if (isChanged) changed.push(i)
-
-    const card = document.createElement('div')
-    card.className = `seg-card ${isChanged ? 'changed' : 'unchanged'}`
-    card.id = `seg-${i}`
-    if (!isChanged && !S.showAll) card.style.display = 'none'
-
-    const timeDisplay = orig.timecode.replace(' --> ', ' → ')
-    card.innerHTML = `
-      <div class="seg-header">
-        <span class="seg-num">${escHtml(orig.index)}</span>
-        <span class="seg-time">${escHtml(timeDisplay)}</span>
-        <span class="seg-badge ${isChanged ? 'changed' : 'unchanged'}">${isChanged ? 'changed' : 'same'}</span>
-      </div>
-      <div class="seg-body">
-        <div class="seg-original">${origHtml}</div>
-        <div class="seg-corrected">${corrHtml}</div>
-      </div>`
-    frags.push(card)
-  }
-
+  for (let i = 0; i < S.originalSegments.length; i++) frags.push(createSegmentCard(i))
   list.append(...frags)
+  updateReviewStats()
+}
 
-  const total = S.originalSegments.length
+function updateReviewStats() {
+  const changed = document.querySelectorAll('#diff-list .seg-card.changed').length
+  const total   = S.originalSegments.length
   document.getElementById('review-stats').textContent =
-    `${changed.length} change${changed.length !== 1 ? 's' : ''} in ${total} segment${total !== 1 ? 's' : ''}`
+    `${changed} change${changed !== 1 ? 's' : ''} in ${total} segment${total !== 1 ? 's' : ''}`
 }
 
 // ─── Review Phase ─────────────────────────────────────────────────────────────
@@ -926,10 +1223,47 @@ function setupMediaSync(player) {
   })
 }
 
+// ─── Manual editing ───────────────────────────────────────────────────────────
+
+function enterEditMode(card) {
+  card.querySelector('.seg-body').classList.add('hidden')
+  const panel = card.querySelector('.seg-edit-panel')
+  panel.classList.remove('hidden')
+  const ta = panel.querySelector('.seg-edit-textarea')
+  ta.focus()
+  ta.setSelectionRange(ta.value.length, ta.value.length)
+}
+
+function cancelEdit(card) {
+  card.querySelector('.seg-edit-panel').classList.add('hidden')
+  card.querySelector('.seg-body').classList.remove('hidden')
+}
+
+function saveEdit(card) {
+  const idx = parseInt(card.id.replace('seg-', ''), 10)
+  if (isNaN(idx)) return
+  const newText = card.querySelector('.seg-edit-textarea').value.trim()
+  const aiText  = S.correctedSegments[idx]?.text ?? ''
+
+  if (newText === aiText) {
+    delete S.userEdits[idx]   // reverted to AI — clear the user override
+  } else {
+    S.userEdits[idx] = newText
+  }
+
+  card.replaceWith(createSegmentCard(idx))
+  updateReviewStats()
+  saveSession()
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 function exportSRT() {
   if (!S.correctedSegments.length) return
-  const content = serializeSRT(S.correctedSegments)
+  // Apply user edits on top of AI corrections before exporting
+  const segments = S.correctedSegments.map((s, i) =>
+    i in S.userEdits ? { ...s, text: S.userEdits[i] } : s
+  )
+  const content = serializeSRT(segments)
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -1049,12 +1383,13 @@ function updateDropZone(zone, filename) {
 // ─── Session persistence ──────────────────────────────────────────────────────
 
 const SK = {
-  phase:     'tc_phase',
-  srtName:   'tc_srt_name',
-  mediaName: 'tc_media_name',
-  mediaMime: 'tc_media_mime',
-  origSegs:  'tc_orig_segs',
-  corrSegs:  'tc_corr_segs',
+  phase:      'tc_phase',
+  srtName:    'tc_srt_name',
+  mediaName:  'tc_media_name',
+  mediaMime:  'tc_media_mime',
+  origSegs:   'tc_orig_segs',
+  corrSegs:   'tc_corr_segs',
+  userEdits:  'tc_user_edits',
 }
 
 let _idb = null
@@ -1097,8 +1432,9 @@ async function saveSession() {
     localStorage.setItem(SK.srtName,   S.srtFile?.name   ?? '')
     localStorage.setItem(SK.mediaName, S.mediaFile?.name ?? '')
     localStorage.setItem(SK.mediaMime, S.mediaFile?.type ?? '')
-    localStorage.setItem(SK.origSegs,  JSON.stringify(S.originalSegments))
-    localStorage.setItem(SK.corrSegs,  JSON.stringify(S.correctedSegments))
+    localStorage.setItem(SK.origSegs,   JSON.stringify(S.originalSegments))
+    localStorage.setItem(SK.corrSegs,   JSON.stringify(S.correctedSegments))
+    localStorage.setItem(SK.userEdits,  JSON.stringify(S.userEdits))
     if (S.mediaFile) {
       await idbPut('mediaFile', await S.mediaFile.arrayBuffer())
     } else {
@@ -1123,6 +1459,7 @@ async function restoreSession() {
 
     S.originalSegments  = orig
     S.correctedSegments = corr
+    S.userEdits = JSON.parse(localStorage.getItem(SK.userEdits) || '{}')
     S.srtFile = { name: localStorage.getItem(SK.srtName) || 'transcript.srt' }
 
     const mediaName = localStorage.getItem(SK.mediaName)
@@ -1162,36 +1499,27 @@ async function correctWithAudio() {
   if (!S.mediaFile) { toast('No media file loaded', 'error'); return }
 
   showPhase('processing')
+  clearLog()
+  setProgress(0, 'Reading audio file…')
+  addLog(`Reading ${S.mediaFile.name} (${(S.mediaFile.size / 1024 / 1024).toFixed(1)} MB)…`)
 
   try {
-    setProgress(10, 'Reading audio file…')
     document.getElementById('processing-status').textContent = 'Reading audio file…'
     const audioData = await readFileAsBase64(S.mediaFile)
+    addLog('File read complete — sending to server…')
 
-    setProgress(25, 'Converting → Whisper → Claude…')
-    document.getElementById('processing-status').textContent =
-      'Server: converting to MP3 → Whisper transcription → Claude comparison…'
-
-    const res = await fetch('/api/correct-audio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        segments:      S.originalSegments,
-        audioData,
-        audioMimeType: S.mediaFile.type,
-        glossary,
-        apiKey,
-        baseUrl,
-        model,
-      }),
+    S.correctedSegments = await runCorrection('/api/correct-audio', {
+      segments:      S.originalSegments,
+      audioData,
+      audioMimeType: S.mediaFile.type,
+      glossary,
+      apiKey,
+      baseUrl,
+      model,
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-
-    S.correctedSegments = data.segments
-    setProgress(100, 'Done')
     setTimeout(() => showReview(), 300)
   } catch (err) {
+    addLog(err.message, 'error')
     toast(err.message, 'error')
     showPhase('upload')
   }
@@ -1234,10 +1562,18 @@ function init() {
 
   document.getElementById('correct-btn').addEventListener('click', correctTranscript)
 
-  // Click a segment → seek video to that timestamp
+  // Segment card interactions: edit buttons + video seek
   document.getElementById('diff-list').addEventListener('click', e => {
     const card = e.target.closest('.seg-card')
     if (!card) return
+
+    // Edit / save / cancel buttons
+    if (e.target.closest('.seg-edit-btn'))   { enterEditMode(card); return }
+    if (e.target.closest('.seg-save-btn'))   { saveEdit(card);      return }
+    if (e.target.closest('.seg-cancel-btn')) { cancelEdit(card);    return }
+
+    // Click on card body (not a button) → seek video
+    if (e.target.closest('button')) return
     const player = document.getElementById('media-player')
     if (!player.src) return
     const idx = parseInt(card.id.replace('seg-', ''), 10)
@@ -1267,6 +1603,7 @@ function init() {
     document.getElementById('diff-col-headers').style.top = ''
     S.srtFile = null
     S.mediaFile = null
+    S.userEdits = {}
     S.originalSegments = []
     S.correctedSegments = []
     if (S.mediaUrl) { URL.revokeObjectURL(S.mediaUrl); S.mediaUrl = null }
