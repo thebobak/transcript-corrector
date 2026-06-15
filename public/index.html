@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcript Corrector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0b0b0f;
+      --surf:     #131318;
+      --surf2:    #1b1b24;
+      --surf3:    #23232f;
+      --border:   #252534;
+      --border2:  #32324a;
+      --accent:   #f59e0b;
+      --accent-d: rgba(245,158,11,.15);
+      --accent-g: rgba(245,158,11,.35);
+      --del:      #f87171;
+      --del-bg:   rgba(248,113,113,.22);
+      --ins:      #4ade80;
+      --ins-bg:   rgba(74,222,128,.22);
+      --text:     #dddde8;
+      --text2:    #8080a0;
+      --text3:    #48485e;
+      --sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --r: 8px;
+    }
+    .hidden { display: none !important; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Light theme overrides ───────────────────────────────────── */
+    body.theme-light {
+      --bg:       #f7f7f3;
+      --surf:     #ffffff;
+      --surf2:    #f0f0ea;
+      --surf3:    #e6e6df;
+      --border:   #deddd6;
+      --border2:  #c8c7be;
+      --accent:   #d97706;
+      --accent-d: rgba(217,119,6,.1);
+      --accent-g: rgba(217,119,6,.3);
+      --del:      #c01a1a;
+      --del-bg:   rgba(192,26,26,.14);
+      --ins:      #16a34a;
+      --ins-bg:   rgba(22,163,74,.14);
+      --text:     #1a1a24;
+      --text2:    #60607a;
+      --text3:    #9898b0;
+    }
+    html { height: 100%; }
+    body {
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── App shell ───────────────────────────────────────────────── */
+    #app { display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    #app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 52px;
+      background: var(--surf);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: -.01em;
+    }
+    .logo-mark {
+      color: var(--accent);
+      font-size: 18px;
+      line-height: 1;
+    }
+    #settings-toggle, #theme-toggle {
+      background: none;
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      padding: 5px 12px;
+      border-radius: var(--r);
+      cursor: pointer;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: border-color .15s, color .15s;
+    }
+    #settings-toggle:hover, #theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    #settings-toggle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-d); }
+
+    /* ── Settings panel ──────────────────────────────────────────── */
+    #settings-panel {
+      background: var(--surf);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      position: sticky;
+      top: 52px;
+      z-index: 90;
+    }
+    #settings-panel.hidden { display: none; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field.span2 { grid-column: 1 / -1; }
+    .field label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .field input, .field select, .field textarea {
+      background: var(--surf2);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: var(--r);
+      font-family: var(--sans);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .15s;
+      width: 100%;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+    .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+    .field select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238080a0' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
+
+    /* ── Phase container ─────────────────────────────────────────── */
+    .phase { flex: 1; padding: 40px 24px; }
+    .phase.hidden { display: none; }
+
+    /* ── Upload phase ────────────────────────────────────────────── */
+    #phase-upload { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; }
+    .upload-area { display: flex; gap: 20px; width: 100%; max-width: 700px; }
+    .drop-zone {
+      flex: 1;
+      border: 2px dashed var(--border2);
+      border-radius: 12px;
+      padding: 36px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+      text-align: center;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-d); }
+    .drop-zone.loaded { border-color: var(--accent); border-style: solid; background: var(--accent-d); }
+    .drop-zone .file-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .drop-icon { font-size: 32px; line-height: 1; margin-bottom: 4px; }
+    .drop-label { font-weight: 600; font-size: 15px; }
+    .drop-sub { font-size: 12px; color: var(--text2); }
+    .drop-filename {
+      font-size: 12px;
+      color: var(--accent);
+      font-family: var(--mono);
+      background: var(--surf3);
+      padding: 3px 8px;
+      border-radius: 4px;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .upload-actions { display: flex; justify-content: center; }
+
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      padding: 10px 28px;
+      border-radius: var(--r);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s, box-shadow .2s;
+      box-shadow: 0 0 0 0 var(--accent-g);
+    }
+    .btn-primary:hover:not(:disabled) { box-shadow: 0 0 18px var(--accent-g); }
+    .btn-primary:disabled { opacity: .35; cursor: not-allowed; }
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      padding: 8px 16px;
+      border-radius: var(--r);
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-ghost:hover { border-color: var(--text2); color: var(--text); }
+
+    .action-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    .btn-audio {
+      background: var(--surf3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 10px 20px;
+      border-radius: var(--r);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .2s;
+    }
+    .btn-audio:hover:not(:disabled) { border-color: var(--ins); box-shadow: 0 0 14px rgba(74,222,128,.2); }
+    .btn-audio:disabled { opacity: .35; cursor: not-allowed; }
+    .audio-hint {
+      font-size: 12px;
+      color: var(--ins);
+      text-align: center;
+      max-width: 480px;
+      line-height: 1.5;
+    }
+
+    /* ── Processing phase ────────────────────────────────────────── */
+    #phase-processing { display: flex; align-items: center; justify-content: center; }
+    .processing-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      max-width: 360px;
+      width: 100%;
+      text-align: center;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid var(--border2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #processing-status { font-weight: 500; font-size: 15px; }
+    .progress-track {
+      width: 100%;
+      height: 3px;
+      background: var(--surf3);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 99px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    .progress-text { font-size: 12px; color: var(--text2); font-family: var(--mono); }
+
+    /* ── Review phase ────────────────────────────────────────────── */
+    #phase-review { padding: 0; display: flex; flex-direction: column; }
+    .review-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: var(--surf);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 52px;
+      z-index: 50;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .review-info { display: flex; align-items: center; gap: 12px; }
+    .filename { font-family: var(--mono); font-size: 13px; color: var(--text2); }
+    .stats-badge {
+      background: var(--surf3);
+      border: 1px solid var(--border2);
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+    }
+    .review-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text2);
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-label input[type=checkbox] {
+      accent-color: var(--accent);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
+
+    /* ── Media player ────────────────────────────────────────────── */
+    #media-container {
+      background: var(--surf2);
+      border-bottom: 1px solid var(--border);
+    }
+    #media-container.hidden { display: none !important; }
+    #media-container.player-collapsed { padding: 0 !important; }
+    #media-container.player-collapsed #media-player,
+    #media-container.player-collapsed .current-subtitle { display: none !important; }
+
+    /* Audio: compact horizontal strip */
+    #media-container.is-audio {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 24px;
+    }
+    #media-container.is-audio #media-player {
+      flex-shrink: 0;
+      height: 40px;
+      width: 300px;
+      border-radius: var(--r);
+      border: 1px solid var(--border2);
+    }
+    #media-container.is-audio .current-subtitle {
+      flex: 1;
+      padding: 8px 12px;
+      background: var(--surf2);
+      border-radius: var(--r);
+      border: 1px solid var(--border2);
+      min-height: 40px;
+    }
+
+    /* Video: sticky player, sized to content */
+    #media-container.is-video {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: sticky;
+      /* top is set in JS after measuring the review-header height */
+      z-index: 30;
+    }
+    #media-container.is-video #media-player {
+      display: block;
+      width: auto;       /* shrink to the video's natural aspect ratio */
+      max-width: 100%;
+      height: auto;
+      max-height: 35vh;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+    }
+    #media-container.is-video { padding-top: 16px; }
+
+    #media-container.is-video .current-subtitle {
+      width: fit-content;
+      max-width: 72%;
+      margin: 12px auto;
+      padding: 10px 24px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      background: var(--surf3);
+      border: 1px solid var(--accent-g);
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.15);
+      min-height: 0;
+    }
+
+    .current-subtitle {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── Diff view ───────────────────────────────────────────────── */
+    .diff-col-headers {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      padding: 8px 24px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: calc(52px + 53px);
+      z-index: 20;
+      background: var(--surf);
+    }
+    .diff-col-label {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--text2);
+      padding: 0 0 0 4px;
+    }
+    .diff-col-label:last-child { border-left: 1px solid var(--border); }
+    #diff-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 4px; }
+    #diff-list.has-media .seg-card { cursor: pointer; }
+    #diff-list.has-media .seg-card:hover { border-color: var(--border2); }
+
+    /* Segment card */
+    .seg-card {
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      transition: border-color .15s;
+    }
+    .seg-card.changed { border-color: rgba(245,158,11,.35); }
+    .seg-card.unchanged { opacity: .55; }
+    .seg-card.active-sub { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-d); }
+    body.theme-light .seg-card.active-sub { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,.18); }
+    .seg-card.active-sub .seg-original,
+    .seg-card.active-sub .seg-corrected { font-weight: 700; }
+    .seg-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      background: var(--surf2);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+    }
+    .seg-card.changed .seg-header { background: rgba(245,158,11,.04); }
+    .seg-num {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text2);
+      min-width: 30px;
+    }
+    .seg-time {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text3);
+      flex: 1;
+    }
+    .seg-badge {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: 2px 8px;
+      border-radius: 99px;
+    }
+    .seg-badge.changed { background: var(--accent-d); color: var(--accent); }
+    .seg-badge.unchanged { background: var(--surf3); color: var(--text3); }
+    .seg-body {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .seg-original, .seg-corrected {
+      padding: 10px 14px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .seg-corrected { border-left: 1px solid var(--border); }
+    del {
+      background: var(--del-bg);
+      color: var(--del);
+      text-decoration: none;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-weight: 700;
+    }
+    ins {
+      background: var(--ins-bg);
+      color: var(--ins);
+      text-decoration: none;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-weight: 700;
+    }
+
+    /* ── Toast ───────────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--surf3);
+      border: 1px solid var(--border2);
+      border-radius: var(--r);
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      animation: toastIn .2s ease;
+      pointer-events: auto;
+      max-width: 420px;
+      text-align: center;
+    }
+    .toast.error { border-color: var(--del); color: var(--del); }
+    .toast.success { border-color: var(--ins); color: var(--ins); }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes toastOut {
+      to { opacity: 0; transform: translateY(4px); }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <header id="app-header">
+    <div class="logo">
+      <span class="logo-mark">◆</span>
+      Transcript Corrector
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="theme-toggle" title="Toggle theme"></button>
+      <button id="settings-toggle">⚙ Settings</button>
+    </div>
+  </header>
+
+  <div id="settings-panel" class="hidden">
+    <div class="field">
+      <label>API Base URL</label>
+      <input type="url" id="base-url" placeholder="https://api.anthropic.com (default)" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input type="password" id="api-key" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>Model</label>
+      <select id="model-select">
+        <option value="claude-opus-4-7">Claude Opus 4.7 — Best accuracy</option>
+        <option value="claude-opus-4-6">Claude Opus 4.6</option>
+        <option value="claude-sonnet-4-6">Claude Sonnet 4.6 — Faster</option>
+        <option value="claude-haiku-4-5">Claude Haiku 4.5 — Fastest</option>
+      </select>
+    </div>
+    <div class="field span2">
+      <label>Domain Context &amp; Glossary (optional)</label>
+      <textarea id="glossary" placeholder="Describe the domain and list known corrections.&#10;Example: This is a software engineering talk. Common corrections needed:&#10;• Actor → Okta&#10;• Get Hub → GitHub&#10;• Conflunce → Confluence"></textarea>
+    </div>
+  </div>
+
+  <!-- Phase: Upload -->
+  <main id="phase-upload" class="phase">
+    <div class="upload-area">
+      <div class="drop-zone" id="drop-srt">
+        <div class="drop-icon">📄</div>
+        <p class="drop-label">SRT Transcript</p>
+        <p class="drop-sub">Drop here or click to browse</p>
+        <input type="file" id="file-srt" accept=".srt,.txt" class="file-input">
+      </div>
+      <div class="drop-zone" id="drop-media">
+        <div class="drop-icon">🎬</div>
+        <p class="drop-label">Media File</p>
+        <p class="drop-sub">Optional — video or audio for review</p>
+        <input type="file" id="file-media" accept="video/*,audio/*" class="file-input">
+      </div>
+    </div>
+    <div class="upload-actions">
+      <div class="action-group">
+        <button id="correct-btn" class="btn-primary" disabled>Correct Transcript</button>
+        <button id="correct-audio-btn" class="btn-audio hidden" disabled>🎧 Correct with Audio</button>
+      </div>
+      <p id="audio-hint" class="audio-hint hidden">Audio loaded — Claude will use Whisper to hear the recording and compare it against the transcript</p>
+    </div>
+  </main>
+
+  <!-- Phase: Processing -->
+  <main id="phase-processing" class="phase hidden">
+    <div class="processing-card">
+      <div class="spinner"></div>
+      <p id="processing-status">Sending to Claude…</p>
+      <div class="progress-track">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <p id="progress-text" class="progress-text">&nbsp;</p>
+    </div>
+  </main>
+
+  <!-- Phase: Review -->
+  <main id="phase-review" class="phase hidden">
+    <div class="review-header">
+      <div class="review-info">
+        <span id="review-filename" class="filename"></span>
+        <span id="review-stats" class="stats-badge"></span>
+      </div>
+      <div class="review-controls">
+        <label class="toggle-label">
+          <input type="checkbox" id="show-all-toggle"> Only show changes
+        </label>
+        <button id="player-toggle" class="btn-ghost hidden">Hide Player</button>
+        <button id="export-btn" class="btn-primary">Export SRT</button>
+        <button id="restart-btn" class="btn-ghost">Start Over</button>
+      </div>
+    </div>
+
+    <div id="media-container" class="hidden">
+      <video id="media-player" controls></video>
+      <p id="current-subtitle" class="current-subtitle">—</p>
+    </div>
+
+    <div class="diff-col-headers" id="diff-col-headers">
+      <div class="diff-col-label">Original</div>
+      <div class="diff-col-label">Corrected</div>
+    </div>
+
+    <div id="diff-list"></div>
+  </main>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const S = {
+  srtFile: null,
+  mediaFile: null,
+  originalSegments: [],
+  correctedSegments: [],
+  mediaUrl: null,
+  showAll: true,
+  _mcObserver: null,
+}
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+
+function applyTheme(theme) {
+  document.body.classList.toggle('theme-light', theme === 'light')
+  document.getElementById('theme-toggle').textContent = theme === 'light' ? '🌙 Dark' : '☀ Light'
+  localStorage.setItem('tc_theme', theme)
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+const KEYS = { apiKey: 'tc_api_key', model: 'tc_model', glossary: 'tc_glossary', baseUrl: 'tc_base_url' }
+
+function loadSettings() {
+  const el = id => document.getElementById(id)
+  el('base-url').value    = localStorage.getItem(KEYS.baseUrl)   ?? ''
+  el('api-key').value     = localStorage.getItem(KEYS.apiKey)    ?? ''
+  el('model-select').value= localStorage.getItem(KEYS.model)     ?? 'claude-opus-4-7'
+  el('glossary').value    = localStorage.getItem(KEYS.glossary)  ?? ''
+}
+
+function getSettings() {
+  const v = id => document.getElementById(id).value.trim()
+  return {
+    baseUrl:  v('base-url'),
+    apiKey:   v('api-key'),
+    model:    document.getElementById('model-select').value,
+    glossary: v('glossary'),
+  }
+}
+
+// ─── SRT Parsing ──────────────────────────────────────────────────────────────
+function parseSRT(text) {
+  // Strip BOM and normalize line endings
+  text = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const blocks = text.trim().split(/\n\n+/)
+  const segments = []
+  let autoIndex = 1
+
+  for (const block of blocks) {
+    const lines = block.trim().split('\n').map(l => l.trim()).filter(l => l)
+    if (lines.length < 2) continue
+
+    let index, timecode, content
+
+    if (/^\d+$/.test(lines[0]) && lines.length >= 3 && lines[1].includes('-->')) {
+      // Standard format: index number, timecode, text
+      index    = lines[0]
+      timecode = lines[1]
+      content  = lines.slice(2).join('\n')
+    } else if (lines[0].includes('-->')) {
+      // No index numbers: timecode is first line
+      index    = String(autoIndex)
+      timecode = lines[0]
+      content  = lines.slice(1).join('\n')
+    } else {
+      continue
+    }
+
+    autoIndex++
+    if (!content.trim()) continue
+    segments.push({ index, timecode, text: content.trim() })
+  }
+  return segments
+}
+
+function serializeSRT(segments) {
+  return segments.map(s => `${s.index}\n${s.timecode}\n${s.text}`).join('\n\n') + '\n'
+}
+
+function parseTimecode(tc) {
+  // "00:01:23,456"
+  const [hms, ms] = tc.split(',')
+  const [h, m, s] = hms.split(':').map(Number)
+  return h * 3600 + m * 60 + s + (Number(ms) / 1000)
+}
+
+function parseTimecodeRange(timecode) {
+  const [a, b] = timecode.split(' --> ')
+  return { start: parseTimecode(a.trim()), end: parseTimecode(b.trim()) }
+}
+
+// ─── Word Diff ────────────────────────────────────────────────────────────────
+function tokenize(text) {
+  return text.split(/(\s+)/).filter(t => t.length > 0)
+}
+
+function wordDiff(orig, corr) {
+  if (orig === corr) return [{ op: '=', text: orig }]
+  const ow = tokenize(orig)
+  const cw = tokenize(corr)
+  const m = ow.length, n = cw.length
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1))
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = ow[i-1].toLowerCase() === cw[j-1].toLowerCase()
+        ? dp[i-1][j-1] + 1
+        : Math.max(dp[i-1][j], dp[i][j-1])
+    }
+  }
+  const ops = []
+  let i = m, j = n
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && ow[i-1].toLowerCase() === cw[j-1].toLowerCase()) {
+      ops.unshift({ op: '=', text: cw[j-1] }); i--; j--
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      ops.unshift({ op: '+', text: cw[j-1] }); j--
+    } else {
+      ops.unshift({ op: '-', text: ow[i-1] }); i--
+    }
+  }
+  return ops
+}
+
+function renderDiffText(orig, corr) {
+  if (orig === corr) return { origHtml: escHtml(orig), corrHtml: escHtml(corr), changed: false }
+  const ops = wordDiff(orig, corr)
+  let origHtml = '', corrHtml = '', changed = false
+  for (const { op, text } of ops) {
+    const t = escHtml(text)
+    if (op === '=') { origHtml += t; corrHtml += t }
+    else if (op === '-') { origHtml += `<del>${t}</del>`; changed = true }
+    else { corrHtml += `<ins>${t}</ins>`; changed = true }
+  }
+  return { origHtml, corrHtml, changed }
+}
+
+// ─── API Call ─────────────────────────────────────────────────────────────────
+async function correctTranscript() {
+  const { apiKey, baseUrl, model, glossary } = getSettings()
+  if (!apiKey) { toast('API key required — open Settings', 'error'); showSettings(true); return }
+
+  showPhase('processing')
+  setProgress(0, `Sending ${S.originalSegments.length} segments to Claude…`)
+
+  try {
+    const res = await fetch('/api/correct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ segments: S.originalSegments, glossary, apiKey, baseUrl, model }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+
+    S.correctedSegments = data.segments
+    setProgress(100, 'Done')
+    setTimeout(() => showReview(), 300)
+  } catch (err) {
+    toast(err.message, 'error')
+    showPhase('upload')
+  }
+}
+
+// ─── Diff Rendering ───────────────────────────────────────────────────────────
+function renderDiff() {
+  const list = document.getElementById('diff-list')
+  list.innerHTML = ''
+
+  const changed = []
+  const frags = []
+
+  for (let i = 0; i < S.originalSegments.length; i++) {
+    const orig = S.originalSegments[i]
+    const corr = S.correctedSegments[i] ?? orig
+    const { origHtml, corrHtml, changed: isChanged } = renderDiffText(orig.text, corr.text)
+
+    if (isChanged) changed.push(i)
+
+    const card = document.createElement('div')
+    card.className = `seg-card ${isChanged ? 'changed' : 'unchanged'}`
+    card.id = `seg-${i}`
+    if (!isChanged && !S.showAll) card.style.display = 'none'
+
+    const timeDisplay = orig.timecode.replace(' --> ', ' → ')
+    card.innerHTML = `
+      <div class="seg-header">
+        <span class="seg-num">${escHtml(orig.index)}</span>
+        <span class="seg-time">${escHtml(timeDisplay)}</span>
+        <span class="seg-badge ${isChanged ? 'changed' : 'unchanged'}">${isChanged ? 'changed' : 'same'}</span>
+      </div>
+      <div class="seg-body">
+        <div class="seg-original">${origHtml}</div>
+        <div class="seg-corrected">${corrHtml}</div>
+      </div>`
+    frags.push(card)
+  }
+
+  list.append(...frags)
+
+  const total = S.originalSegments.length
+  document.getElementById('review-stats').textContent =
+    `${changed.length} change${changed.length !== 1 ? 's' : ''} in ${total} segment${total !== 1 ? 's' : ''}`
+}
+
+// ─── Review Phase ─────────────────────────────────────────────────────────────
+function showReview() {
+  showPhase('review')
+  document.getElementById('review-filename').textContent = S.srtFile?.name ?? ''
+  renderDiff()
+  saveSession()
+
+  // Media player
+  const mc = document.getElementById('media-container')
+  const player = document.getElementById('media-player')
+  document.getElementById('diff-list').classList.toggle('has-media', !!S.mediaUrl)
+  const playerToggleBtn = document.getElementById('player-toggle')
+  playerToggleBtn.classList.toggle('hidden', !S.mediaUrl)
+  playerToggleBtn.textContent = 'Hide Player'
+  document.getElementById('media-container').classList.remove('player-collapsed')
+
+  // Disconnect any previous observer
+  S._mcObserver?.disconnect()
+  S._mcObserver = null
+  const diffHeaders = document.getElementById('diff-col-headers')
+  diffHeaders.style.top = ''   // reset to CSS default
+
+  if (S.mediaUrl) {
+    const isVideo = S.mediaFile?.type?.startsWith('video/')
+    player.src = S.mediaUrl
+    mc.classList.remove('hidden', 'is-video', 'is-audio')
+    mc.classList.add(isVideo ? 'is-video' : 'is-audio')
+
+    if (isVideo) {
+      const appH    = document.getElementById('app-header').getBoundingClientRect().height
+      const reviewH = document.querySelector('.review-header').getBoundingClientRect().height
+      mc.style.top  = `${appH + reviewH}px`
+
+      // Keep diff-col-headers sticky just below the media container,
+      // updating whenever the video resizes (e.g. after metadata loads)
+      S._mcObserver = new ResizeObserver(() => {
+        diffHeaders.style.top = `${appH + reviewH + mc.offsetHeight}px`
+      })
+      S._mcObserver.observe(mc)
+    }
+
+    setupMediaSync(player)
+  } else {
+    mc.classList.add('hidden')
+  }
+}
+
+function setupMediaSync(player) {
+  // Pre-parse all timecode ranges
+  const ranges = S.correctedSegments.map(s => {
+    try { return parseTimecodeRange(s.timecode) }
+    catch { return null }
+  })
+
+  let lastIdx = -1
+
+  player.addEventListener('timeupdate', () => {
+    const t = player.currentTime
+    const idx = ranges.findIndex(r => r && t >= r.start && t <= r.end)
+    if (idx === lastIdx) return
+    lastIdx = idx
+
+    // Remove previous active
+    document.querySelectorAll('.seg-card.active-sub').forEach(c => c.classList.remove('active-sub'))
+
+    if (idx >= 0) {
+      const seg = S.correctedSegments[idx]
+      document.getElementById('current-subtitle').textContent = seg.text
+      const card = document.getElementById(`seg-${idx}`)
+      if (card) {
+        card.classList.add('active-sub')
+        if (getComputedStyle(card).display === 'none') {
+          card.style.display = ''
+        }
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+    } else {
+      document.getElementById('current-subtitle').textContent = '—'
+    }
+  })
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+function exportSRT() {
+  if (!S.correctedSegments.length) return
+  const content = serializeSRT(S.correctedSegments)
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const base = S.srtFile?.name?.replace(/\.[^.]+$/, '') ?? 'transcript'
+  a.href = url
+  a.download = `${base}_corrected.srt`
+  a.click()
+  URL.revokeObjectURL(url)
+  toast('Exported!', 'success')
+}
+
+// ─── UI Helpers ───────────────────────────────────────────────────────────────
+function showPhase(name) {
+  document.querySelectorAll('.phase').forEach(p => p.classList.add('hidden'))
+  const target = document.getElementById(`phase-${name}`)
+  if (target) target.classList.remove('hidden')
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progress-fill').style.width = pct + '%'
+  document.getElementById('processing-status').textContent = label
+  document.getElementById('progress-text').textContent =
+    pct > 0 && pct < 100 ? `${pct}%` : ''
+}
+
+function toast(msg, type = 'info') {
+  const el = document.createElement('div')
+  el.className = `toast${type !== 'info' ? ' ' + type : ''}`
+  el.textContent = msg
+  document.getElementById('toast-container').append(el)
+  setTimeout(() => {
+    el.style.animation = 'toastOut .2s ease forwards'
+    setTimeout(() => el.remove(), 200)
+  }, type === 'error' ? 5000 : 2500)
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function showSettings(open) {
+  const panel = document.getElementById('settings-panel')
+  const btn = document.getElementById('settings-toggle')
+  const isOpen = open ?? panel.classList.contains('hidden')
+  panel.classList.toggle('hidden', !isOpen)
+  btn.classList.toggle('active', isOpen)
+}
+
+function updateCorrectButton() {
+  const hasSRT = !!S.srtFile
+  document.getElementById('correct-btn').disabled = !hasSRT
+  const audioBtn = document.getElementById('correct-audio-btn')
+  const hint = document.getElementById('audio-hint')
+  const hasMedia = !!S.mediaFile
+  audioBtn.classList.toggle('hidden', !hasSRT || !hasMedia)
+  audioBtn.disabled = !hasSRT || !hasMedia
+  hint.classList.toggle('hidden', !hasMedia)
+}
+
+// ─── File Setup ───────────────────────────────────────────────────────────────
+function setupDropZone(zoneId, inputId, type) {
+  const zone = document.getElementById(zoneId)
+  const input = document.getElementById(inputId)
+
+  function handleFile(file) {
+    if (type === 'srt') {
+      S.srtFile = file
+      const reader = new FileReader()
+      reader.onload = e => {
+        S.originalSegments = parseSRT(e.target.result)
+        if (!S.originalSegments.length) {
+          toast('Could not parse SRT file — check format', 'error')
+          S.srtFile = null
+          return
+        }
+        updateDropZone(zone, file.name)
+        updateCorrectButton()
+      }
+      reader.readAsText(file)
+    } else {
+      S.mediaFile = file
+      if (S.mediaUrl) URL.revokeObjectURL(S.mediaUrl)
+      S.mediaUrl = URL.createObjectURL(file)
+      updateDropZone(zone, file.name)
+      updateCorrectButton()
+    }
+  }
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) handleFile(input.files[0])
+    input.value = ''
+  })
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
+  zone.addEventListener('drop', e => {
+    e.preventDefault()
+    zone.classList.remove('drag-over')
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  })
+}
+
+function updateDropZone(zone, filename) {
+  zone.classList.add('loaded')
+  let sub = zone.querySelector('.drop-sub')
+  let fn = zone.querySelector('.drop-filename')
+  sub.style.display = 'none'
+  if (!fn) {
+    fn = document.createElement('span')
+    fn.className = 'drop-filename'
+    zone.appendChild(fn)
+  }
+  fn.textContent = filename
+}
+
+// ─── Session persistence ──────────────────────────────────────────────────────
+
+const SK = {
+  phase:     'tc_phase',
+  srtName:   'tc_srt_name',
+  mediaName: 'tc_media_name',
+  mediaMime: 'tc_media_mime',
+  origSegs:  'tc_orig_segs',
+  corrSegs:  'tc_corr_segs',
+}
+
+let _idb = null
+async function openIDB() {
+  if (_idb) return _idb
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('transcript-corrector', 1)
+    req.onupgradeneeded = e => e.target.result.createObjectStore('files')
+    req.onsuccess  = e => { _idb = e.target.result; resolve(_idb) }
+    req.onerror    = e => reject(e.target.error)
+  })
+}
+async function idbPut(key, val) {
+  const db = await openIDB()
+  return new Promise((res, rej) => {
+    const tx = db.transaction('files', 'readwrite')
+    tx.objectStore('files').put(val, key)
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error)
+  })
+}
+async function idbGet(key) {
+  const db = await openIDB()
+  return new Promise((res, rej) => {
+    const req = db.transaction('files', 'readonly').objectStore('files').get(key)
+    req.onsuccess = e => res(e.target.result); req.onerror = e => rej(e.target.error)
+  })
+}
+async function idbDel(key) {
+  const db = await openIDB()
+  return new Promise(res => {
+    const tx = db.transaction('files', 'readwrite')
+    tx.objectStore('files').delete(key)
+    tx.oncomplete = res; tx.onerror = res  // ignore delete errors
+  })
+}
+
+async function saveSession() {
+  try {
+    localStorage.setItem(SK.phase,     'review')
+    localStorage.setItem(SK.srtName,   S.srtFile?.name   ?? '')
+    localStorage.setItem(SK.mediaName, S.mediaFile?.name ?? '')
+    localStorage.setItem(SK.mediaMime, S.mediaFile?.type ?? '')
+    localStorage.setItem(SK.origSegs,  JSON.stringify(S.originalSegments))
+    localStorage.setItem(SK.corrSegs,  JSON.stringify(S.correctedSegments))
+    if (S.mediaFile) {
+      await idbPut('mediaFile', await S.mediaFile.arrayBuffer())
+    } else {
+      await idbDel('mediaFile')
+    }
+  } catch (e) {
+    console.warn('saveSession:', e)
+  }
+}
+
+async function clearSession() {
+  Object.values(SK).forEach(k => localStorage.removeItem(k))
+  await idbDel('mediaFile').catch(() => {})
+}
+
+async function restoreSession() {
+  if (localStorage.getItem(SK.phase) !== 'review') return
+  try {
+    const orig = JSON.parse(localStorage.getItem(SK.origSegs) || 'null')
+    const corr = JSON.parse(localStorage.getItem(SK.corrSegs) || 'null')
+    if (!orig?.length || !corr?.length) return
+
+    S.originalSegments  = orig
+    S.correctedSegments = corr
+    S.srtFile = { name: localStorage.getItem(SK.srtName) || 'transcript.srt' }
+
+    const mediaName = localStorage.getItem(SK.mediaName)
+    const mediaMime = localStorage.getItem(SK.mediaMime)
+    if (mediaName && mediaMime) {
+      const buf = await idbGet('mediaFile').catch(() => null)
+      if (buf) {
+        const blob = new Blob([buf], { type: mediaMime })
+        S.mediaFile = new File([blob], mediaName, { type: mediaMime })
+        S.mediaUrl  = URL.createObjectURL(blob)
+      }
+    }
+
+    showReview()
+  } catch (e) {
+    console.warn('restoreSession:', e)
+    await clearSession()
+  }
+}
+
+// ─── Audio helpers ────────────────────────────────────────────────────────────
+
+async function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = e => resolve(e.target.result.split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+// ─── Audio-guided correction ───────────────────────────────────────────────────
+
+async function correctWithAudio() {
+  const { apiKey, baseUrl, model, glossary } = getSettings()
+  if (!apiKey)      { toast('API key required — open Settings', 'error'); showSettings(true); return }
+  if (!S.mediaFile) { toast('No media file loaded', 'error'); return }
+
+  showPhase('processing')
+
+  try {
+    setProgress(10, 'Reading audio file…')
+    document.getElementById('processing-status').textContent = 'Reading audio file…'
+    const audioData = await readFileAsBase64(S.mediaFile)
+
+    setProgress(25, 'Converting → Whisper → Claude…')
+    document.getElementById('processing-status').textContent =
+      'Server: converting to MP3 → Whisper transcription → Claude comparison…'
+
+    const res = await fetch('/api/correct-audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        segments:      S.originalSegments,
+        audioData,
+        audioMimeType: S.mediaFile.type,
+        glossary,
+        apiKey,
+        baseUrl,
+        model,
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+
+    S.correctedSegments = data.segments
+    setProgress(100, 'Done')
+    setTimeout(() => showReview(), 300)
+  } catch (err) {
+    toast(err.message, 'error')
+    showPhase('upload')
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+function init() {
+  applyTheme(localStorage.getItem('tc_theme') || 'dark')
+  document.getElementById('theme-toggle').addEventListener('click', () =>
+    applyTheme(document.body.classList.contains('theme-light') ? 'dark' : 'light')
+  )
+
+  loadSettings()
+  setupDropZone('drop-srt', 'file-srt', 'srt')
+  setupDropZone('drop-media', 'file-media', 'media')
+
+  document.getElementById('settings-toggle').addEventListener('click', () => showSettings())
+
+  // Auto-save settings
+  ;['base-url', 'api-key', 'model-select', 'glossary'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+      localStorage.setItem(KEYS.baseUrl,  document.getElementById('base-url').value.trim())
+      localStorage.setItem(KEYS.apiKey,   document.getElementById('api-key').value.trim())
+      localStorage.setItem(KEYS.model,    document.getElementById('model-select').value)
+      localStorage.setItem(KEYS.glossary, document.getElementById('glossary').value.trim())
+    })
+  })
+
+  document.getElementById('player-toggle').addEventListener('click', () => {
+    const mc  = document.getElementById('media-container')
+    const btn = document.getElementById('player-toggle')
+    const collapsed = mc.classList.toggle('player-collapsed')
+    btn.textContent = collapsed ? 'Show Player' : 'Hide Player'
+    // If expanding, restore diff-col-headers via the ResizeObserver;
+    // if collapsing, reset it to its CSS default (just below review-header)
+    if (collapsed) {
+      document.getElementById('diff-col-headers').style.top = ''
+    }
+  })
+
+  document.getElementById('correct-btn').addEventListener('click', correctTranscript)
+
+  // Click a segment → seek video to that timestamp
+  document.getElementById('diff-list').addEventListener('click', e => {
+    const card = e.target.closest('.seg-card')
+    if (!card) return
+    const player = document.getElementById('media-player')
+    if (!player.src) return
+    const idx = parseInt(card.id.replace('seg-', ''), 10)
+    if (isNaN(idx)) return
+    const seg = S.correctedSegments[idx]
+    if (!seg?.timecode) return
+    try {
+      player.currentTime = parseTimecodeRange(seg.timecode).start
+      if (player.paused) player.play().catch(() => {})
+    } catch {}
+  })
+  document.getElementById('correct-audio-btn').addEventListener('click', correctWithAudio)
+
+  document.getElementById('show-all-toggle').addEventListener('change', e => {
+    S.showAll = !e.target.checked
+    document.querySelectorAll('.seg-card.unchanged').forEach(c => {
+      c.style.display = S.showAll ? '' : 'none'
+    })
+  })
+
+  document.getElementById('export-btn').addEventListener('click', exportSRT)
+
+  document.getElementById('restart-btn').addEventListener('click', () => {
+    clearSession()
+    S._mcObserver?.disconnect()
+    S._mcObserver = null
+    document.getElementById('diff-col-headers').style.top = ''
+    S.srtFile = null
+    S.mediaFile = null
+    S.originalSegments = []
+    S.correctedSegments = []
+    if (S.mediaUrl) { URL.revokeObjectURL(S.mediaUrl); S.mediaUrl = null }
+    document.getElementById('diff-list').innerHTML = ''
+    // Reset drop zones
+    document.querySelectorAll('.drop-zone').forEach(z => {
+      z.classList.remove('loaded', 'drag-over')
+      z.querySelector('.drop-sub').style.display = ''
+      z.querySelector('.drop-filename')?.remove()
+    })
+    document.getElementById('file-srt').value = ''
+    document.getElementById('file-media').value = ''
+    S.showAll = true
+    document.getElementById('show-all-toggle').checked = false
+    document.getElementById('correct-audio-btn').classList.add('hidden')
+    document.getElementById('audio-hint').classList.add('hidden')
+    document.getElementById('player-toggle').classList.add('hidden')
+    document.getElementById('media-container').classList.remove('player-collapsed')
+    updateCorrectButton()
+    showPhase('upload')
+  })
+
+  restoreSession()
+}
+
+init()
+</script>
+</body>
+</html>

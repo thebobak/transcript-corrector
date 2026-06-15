@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+.envrc
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp files (created by ffmpeg conversion)
+/tmp/
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
