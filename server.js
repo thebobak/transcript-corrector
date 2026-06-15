@@ -1,6 +1,7 @@
 import express from 'express'
 import Anthropic from '@anthropic-ai/sdk'
 import { writeFile, readFile, rm, mkdtemp } from 'fs/promises'
+import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -27,10 +28,12 @@ const BYTES_PER_SEC    = (ENCODE_KBPS * 1000) / 8
 
 function openSSE(res) {
   res.writeHead(200, {
-    'Content-Type':  'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection':    'keep-alive',
+    'Content-Type':       'text/event-stream',
+    'Cache-Control':      'no-cache',
+    'Connection':         'keep-alive',
+    'X-Accel-Buffering':  'no',   // prevent nginx from buffering SSE
   })
+  res.flushHeaders()  // force headers through reverse proxies immediately
   const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`)
   return {
     log:       (message, level = 'info') => send({ type: 'log', message, level }),
@@ -127,14 +130,19 @@ function ffmpegConvert(inputPath, outputPath, opts = {}) {
     let cmd = Ffmpeg(inputPath).noVideo()
     if (opts.seek     != null) cmd = cmd.seekInput(opts.seek)
     if (opts.duration != null) cmd = cmd.duration(opts.duration)
+    const stderrLines = []
     cmd
       .audioCodec('libmp3lame')
       .audioBitrate(`${ENCODE_KBPS}k`)
       .audioChannels(1)
       .audioFrequency(16000)
       .save(outputPath)
+      .on('stderr', line => stderrLines.push(line))
       .on('end', resolve)
-      .on('error', err => reject(new Error(`ffmpeg: ${err.message}`)))
+      .on('error', err => {
+        const detail = stderrLines.slice(-3).join(' | ')
+        reject(new Error(`ffmpeg: ${err.message}${detail ? ` [${detail}]` : ''}`))
+      })
   })
 }
 
@@ -190,8 +198,10 @@ async function callWhisper(audioBuffer, baseUrl, apiKey) {
     body: form,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error?.message ?? `Whisper error ${res.status}`)
+    const body = await res.text().catch(() => '')
+    let msg = `Whisper HTTP ${res.status}`
+    try { msg = JSON.parse(body).error?.message ?? msg } catch {}
+    throw new Error(`${msg} — URL: ${baseUrl}/v1/audio/transcriptions — body: ${body.slice(0, 200)}`)
   }
   return res.json()
 }
@@ -275,6 +285,14 @@ app.post('/api/correct-audio', async (req, res) => {
   if (!apiKey)           { emit.error('API key is required.'); return emit.end() }
   if (!segments?.length) { emit.error('No segments provided.'); return emit.end() }
   if (!audioData)        { emit.error('No audio data provided.'); return emit.end() }
+
+  // Fail fast with a clear message if the server environment can't handle audio
+  const diag = systemDiagnostics()
+  if (!diag.audioCapable) {
+    const msg = diag.warnings.join(' | ')
+    emit.error(`Server environment cannot process audio: ${msg}`)
+    return emit.end()
+  }
 
   const baseUrl = rawBase ? rawBase.replace(/\/v1\/messages\/?$/, '') : 'https://api.anthropic.com'
 
@@ -386,8 +404,57 @@ app.post('/api/correct-audio', async (req, res) => {
   emit.end()
 })
 
+// ─── Health check ─────────────────────────────────────────────────────────────
+
+function systemDiagnostics() {
+  const nodeVer  = process.version
+  const nodeMaj  = parseInt(nodeVer.slice(1))
+  const hasFetch = typeof fetch !== 'undefined'
+  const hasBlob  = typeof Blob  !== 'undefined'
+  const hasForm  = typeof FormData !== 'undefined'
+  const ffmpegOk = ffmpegBin && existsSync(ffmpegBin)
+
+  return {
+    node:    nodeVer,
+    platform: process.platform,
+    arch:    process.arch,
+    ffmpegPath: ffmpegBin ?? null,
+    ffmpegExists: ffmpegOk,
+    nativeFetch:    hasFetch,
+    nativeBlob:     hasBlob,
+    nativeFormData: hasForm,
+    audioCapable:   hasFetch && hasBlob && hasForm && ffmpegOk,
+    warnings: [
+      nodeMaj < 18  && `Node ${nodeVer} detected — native fetch/Blob/FormData require Node 18+. Audio correction WILL FAIL.`,
+      !ffmpegOk     && `ffmpeg binary not found at ${ffmpegBin}. Audio conversion WILL FAIL. Re-run: npm install`,
+      !hasFetch     && 'globalThis.fetch unavailable — audio correction will fail.',
+      !hasBlob      && 'globalThis.Blob unavailable — audio correction will fail.',
+      !hasForm      && 'globalThis.FormData unavailable — audio correction will fail.',
+    ].filter(Boolean),
+  }
+}
+
+app.get('/api/health', (_req, res) => {
+  const diag = systemDiagnostics()
+  res.status(diag.audioCapable ? 200 : 503).json(diag)
+})
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+
 const PORT = process.env.PORT ?? 3000
 app.listen(PORT, () => {
-  console.log(`\n  ◆ Transcript Corrector`)
-  console.log(`  → http://localhost:${PORT}\n`)
+  console.log(`\n  ◆ Transcript Corrector  →  http://localhost:${PORT}`)
+
+  const diag = systemDiagnostics()
+  console.log(`  Node ${diag.node}  |  ${diag.platform}/${diag.arch}`)
+  console.log(`  ffmpeg  : ${diag.ffmpegExists ? diag.ffmpegPath : '✗ NOT FOUND'}`)
+  console.log(`  fetch   : ${diag.nativeFetch    ? '✓' : '✗ missing (Node 18+ required)'}`)
+  console.log(`  Blob    : ${diag.nativeBlob     ? '✓' : '✗ missing'}`)
+  console.log(`  FormData: ${diag.nativeFormData ? '✓' : '✗ missing'}`)
+
+  if (diag.warnings.length) {
+    console.log('\n  ⚠ Warnings:')
+    diag.warnings.forEach(w => console.log(`    • ${w}`))
+  }
+  console.log()
 })
