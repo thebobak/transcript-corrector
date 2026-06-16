@@ -144,6 +144,15 @@
     .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
     .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
     .field select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238080a0' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
+    .input-wrap { position: relative; display: flex; }
+    .input-wrap input { flex: 1; }
+    .input-wrap .reveal-btn {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; color: var(--text2);
+      padding: 2px 4px; font-size: 15px; line-height: 1;
+      transition: color .15s;
+    }
+    .input-wrap .reveal-btn:hover { color: var(--accent); }
 
     /* ── Phase container ─────────────────────────────────────────── */
     .phase { flex: 1; padding: 40px 24px; }
@@ -398,6 +407,16 @@
       color: var(--accent);
     }
     .review-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .nav-group, .history-group { display: flex; align-items: center; gap: 4px; }
+    .nav-group .nav-count { font-size: 12px; color: var(--text2); min-width: 40px; text-align: center; }
+    .btn-icon {
+      background: none; border: 1px solid var(--border2); color: var(--text2);
+      width: 28px; height: 28px; border-radius: var(--r); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 14px;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-icon:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-icon:disabled { opacity: .3; cursor: not-allowed; }
     .toggle-label {
       display: flex;
       align-items: center;
@@ -719,7 +738,10 @@
     </div>
     <div class="field">
       <label>API Key</label>
-      <input type="password" id="api-key" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+      <div class="input-wrap">
+        <input type="password" id="api-key" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+        <button type="button" class="reveal-btn" id="api-key-reveal" title="Show/hide key">👁</button>
+      </div>
     </div>
     <div class="field">
       <label>Model</label>
@@ -786,6 +808,15 @@
         <label class="toggle-label">
           <input type="checkbox" id="show-all-toggle"> Only show changes
         </label>
+        <div class="nav-group" id="nav-group">
+          <button class="btn-icon" id="nav-prev" title="Previous change" disabled>&#8593;</button>
+          <span class="nav-count" id="nav-count">0/0</span>
+          <button class="btn-icon" id="nav-next" title="Next change" disabled>&#8595;</button>
+        </div>
+        <div class="history-group">
+          <button class="btn-icon" id="undo-btn" title="Undo" disabled>&#8630;</button>
+          <button class="btn-icon" id="redo-btn" title="Redo" disabled>&#8631;</button>
+        </div>
         <button id="player-toggle" class="btn-ghost hidden">Hide Player</button>
         <button id="export-btn" class="btn-primary">Export SRT</button>
         <button id="restart-btn" class="btn-ghost">Start Over</button>
@@ -820,6 +851,9 @@ const S = {
   mediaUrl: null,
   showAll: true,
   _mcObserver: null,
+  _undoStack: [],       // snapshots of userEdits before each manual save
+  _redoStack: [],
+  _navIdx: -1,          // current position in changed-segment navigation
 }
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -983,6 +1017,8 @@ function updateStep(id, status) {
 function clearLog() {
   document.getElementById('log-console').innerHTML = ''
   document.getElementById('step-list').innerHTML = ''
+  S._undoStack = []
+  S._redoStack = []
 }
 
 function addLog(message, level = 'info') {
@@ -1064,6 +1100,15 @@ async function correctTranscript() {
   clearLog()
   setProgress(0, 'Starting…')
   addLog(`Starting text-only correction for ${S.originalSegments.length} segments…`)
+
+  const totalChunks = Math.ceil(S.originalSegments.length / 200)
+  renderPipeline([
+    { id: 'prepare', label: `Prepare — ${S.originalSegments.length} segments` },
+    ...Array.from({ length: totalChunks }, (_, i) => ({
+      id: `claude_${i + 1}`, label: `Claude correction — chunk ${i + 1} of ${totalChunks}`,
+    })),
+    { id: 'done', label: 'Complete' },
+  ])
 
   try {
     S.correctedSegments = await runCorrection('/api/correct', {
@@ -1148,6 +1193,8 @@ function updateReviewStats() {
   const total   = S.originalSegments.length
   document.getElementById('review-stats').textContent =
     `${changed} change${changed !== 1 ? 's' : ''} in ${total} segment${total !== 1 ? 's' : ''}`
+  S._navIdx = -1
+  updateNavUI()
 }
 
 // ─── Review Phase ─────────────────────────────────────────────────────────────
@@ -1254,16 +1301,80 @@ function saveEdit(card) {
   const newText = card.querySelector('.seg-edit-textarea').value.trim()
   const aiText  = S.correctedSegments[idx]?.text ?? ''
 
+  // Snapshot before mutating so undo can restore it
+  S._undoStack.push({ ...S.userEdits })
+  S._redoStack = []
+
   if (newText === aiText) {
-    delete S.userEdits[idx]   // reverted to AI — clear the user override
+    delete S.userEdits[idx]
   } else {
     S.userEdits[idx] = newText
   }
 
   card.replaceWith(createSegmentCard(idx))
   updateReviewStats()
+  updateHistoryButtons()
   saveSession()
 }
+
+// ─── Undo / Redo ─────────────────────────────────────────────────────────────
+
+function updateHistoryButtons() {
+  document.getElementById('undo-btn').disabled = S._undoStack.length === 0
+  document.getElementById('redo-btn').disabled = S._redoStack.length === 0
+}
+
+function applyEditsSnapshot(snapshot) {
+  S.userEdits = { ...snapshot }
+  renderDiff()
+  updateHistoryButtons()
+  saveSession()
+}
+
+function undoEdit() {
+  if (!S._undoStack.length) return
+  S._redoStack.push({ ...S.userEdits })
+  applyEditsSnapshot(S._undoStack.pop())
+}
+
+function redoEdit() {
+  if (!S._redoStack.length) return
+  S._undoStack.push({ ...S.userEdits })
+  applyEditsSnapshot(S._redoStack.pop())
+}
+
+// ─── Change navigation ────────────────────────────────────────────────────────
+
+function getChangedCards() {
+  return [...document.querySelectorAll('#diff-list .seg-card.changed')]
+}
+
+function updateNavUI() {
+  const cards = getChangedCards()
+  const count = document.getElementById('nav-count')
+  const prev  = document.getElementById('nav-prev')
+  const next  = document.getElementById('nav-next')
+  if (!cards.length) {
+    count.textContent = '0/0'
+    prev.disabled = next.disabled = true
+    return
+  }
+  const pos = S._navIdx >= 0 && S._navIdx < cards.length ? S._navIdx : -1
+  count.textContent = pos >= 0 ? `${pos + 1}/${cards.length}` : `0/${cards.length}`
+  prev.disabled = pos <= 0
+  next.disabled = pos >= cards.length - 1
+}
+
+function navTo(idx) {
+  const cards = getChangedCards()
+  if (!cards.length) return
+  S._navIdx = Math.max(0, Math.min(idx, cards.length - 1))
+  cards[S._navIdx].scrollIntoView({ behavior: 'smooth', block: 'center' })
+  updateNavUI()
+}
+
+function navNext() { navTo(S._navIdx < 0 ? 0 : S._navIdx + 1) }
+function navPrev() { navTo(S._navIdx - 1) }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 function exportSRT() {
@@ -1512,6 +1623,15 @@ async function correctWithAudio() {
   setProgress(0, 'Reading audio file…')
   addLog(`Reading ${S.mediaFile.name} (${(S.mediaFile.size / 1024 / 1024).toFixed(1)} MB)…`)
 
+  renderPipeline([
+    { id: 'read',    label: 'Read audio file' },
+    { id: 'convert', label: 'Convert to MP3 (64kbps mono 16kHz)' },
+    { id: 'whisper', label: 'Whisper transcription' },
+    { id: 'align',   label: 'Align transcripts by timecode' },
+    { id: 'claude',  label: 'Claude comparison' },
+    { id: 'done',    label: 'Complete' },
+  ])
+
   try {
     document.getElementById('processing-status').textContent = 'Reading audio file…'
     const audioData = await readFileAsBase64(S.mediaFile)
@@ -1579,6 +1699,19 @@ function init() {
   })
 
   document.getElementById('correct-btn').addEventListener('click', correctTranscript)
+
+  document.getElementById('api-key-reveal').addEventListener('click', () => {
+    const input = document.getElementById('api-key')
+    const btn   = document.getElementById('api-key-reveal')
+    const show  = input.type === 'password'
+    input.type  = show ? 'text' : 'password'
+    btn.textContent = show ? '🙈' : '👁'
+  })
+
+  document.getElementById('nav-prev').addEventListener('click', navPrev)
+  document.getElementById('nav-next').addEventListener('click', navNext)
+  document.getElementById('undo-btn').addEventListener('click', undoEdit)
+  document.getElementById('redo-btn').addEventListener('click', redoEdit)
 
   // Segment card interactions: edit buttons + video seek
   document.getElementById('diff-list').addEventListener('click', e => {
