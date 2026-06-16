@@ -1015,18 +1015,7 @@ async function* readSSE(response) {
   }
 }
 
-async function runCorrection(url, body) {
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body),
-  })
-  // Non-2xx before stream starts (e.g. 413 payload too large)
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `HTTP ${res.status}`)
-  }
-
+async function consumeSSE(res) {
   let segments = null
   for await (const event of readSSE(res)) {
     if (event.type === 'log') {
@@ -1050,6 +1039,19 @@ async function runCorrection(url, body) {
   }
   if (!segments) throw new Error('Server closed without returning a result')
   return segments
+}
+
+async function runCorrection(url, body) {
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+  return consumeSSE(res)
 }
 
 // ─── Correction flows ─────────────────────────────────────────────────────────
@@ -1513,17 +1515,26 @@ async function correctWithAudio() {
   try {
     document.getElementById('processing-status').textContent = 'Reading audio file…'
     const audioData = await readFileAsBase64(S.mediaFile)
-    addLog('File read complete — sending to server…')
+    addLog('File read complete — submitting job…')
 
-    S.correctedSegments = await runCorrection('/api/correct-audio', {
-      segments:      S.originalSegments,
-      audioData,
-      audioMimeType: S.mediaFile.type,
-      glossary,
-      apiKey,
-      baseUrl,
-      model,
+    // Step 1: POST audio data, get back a jobId immediately (avoids gateway timeout)
+    const submitRes = await fetch('/api/correct-audio', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ segments: S.originalSegments, audioData, audioMimeType: S.mediaFile.type, glossary, apiKey, baseUrl, model }),
     })
+    if (!submitRes.ok) {
+      const err = await submitRes.json().catch(() => ({}))
+      throw new Error(err.error || `HTTP ${submitRes.status}`)
+    }
+    const { jobId } = await submitRes.json()
+    addLog('Job accepted — opening result stream…')
+
+    // Step 2: open SSE stream for the job results
+    const streamRes = await fetch(`/api/jobs/${jobId}/stream`)
+    if (!streamRes.ok) throw new Error(`Stream error HTTP ${streamRes.status}`)
+
+    S.correctedSegments = await consumeSSE(streamRes)
     setTimeout(() => showReview(), 300)
   } catch (err) {
     addLog(err.message, 'error')
@@ -1639,7 +1650,7 @@ function init() {
 init()
 </script>
 
-<footer id="build-footer" data-build="2026-06-15T17:35:00Z"></footer>
+<footer id="build-footer" data-build="2026-06-15T17:55:00Z"></footer>
 <script>
   const bf = document.getElementById('build-footer')
   const d = new Date(bf.dataset.build)

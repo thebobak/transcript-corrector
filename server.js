@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { createRequire } from 'module'
+import { randomUUID } from 'crypto'
 
 const require = createRequire(import.meta.url)
 const Ffmpeg    = require('fluent-ffmpeg')
@@ -24,20 +25,22 @@ const MAX_WHISPER_BYTES = 24 * 1024 * 1024
 const ENCODE_KBPS      = 64
 const BYTES_PER_SEC    = (ENCODE_KBPS * 1000) / 8
 
-// ─── SSE helper ──────────────────────────────────────────────────────────────
+// ─── SSE helpers ─────────────────────────────────────────────────────────────
 
+function sseHeaders() {
+  return {
+    'Content-Type':      'text/event-stream',
+    'Cache-Control':     'no-cache',
+    'Connection':        'keep-alive',
+    'X-Accel-Buffering': 'no',
+  }
+}
+
+// Used by the text-only /api/correct route (short enough to avoid gateway timeout)
 function openSSE(res) {
-  res.writeHead(200, {
-    'Content-Type':       'text/event-stream',
-    'Cache-Control':      'no-cache',
-    'Connection':         'keep-alive',
-    'X-Accel-Buffering':  'no',   // prevent nginx from buffering SSE
-  })
-  res.flushHeaders()  // force headers through reverse proxies immediately
-
-  // Send a comment ping every 5s to prevent proxy idle-timeout disconnects
+  res.writeHead(200, sseHeaders())
+  res.flushHeaders()
   const keepalive = setInterval(() => res.write(': ping\n\n'), 5000)
-
   const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`)
   return {
     log:       (message, level = 'info') => send({ type: 'log', message, level }),
@@ -50,6 +53,38 @@ function openSSE(res) {
     error:     message                  => send({ type: 'error', message }),
     end:       ()                       => { clearInterval(keepalive); res.end() },
   }
+}
+
+// ─── Job store (audio pipeline) ───────────────────────────────────────────────
+// POST /api/correct-audio returns a jobId immediately; the client then opens
+// GET /api/jobs/:id/stream to receive SSE events. This avoids gateway POST timeouts.
+
+const jobs = new Map()
+
+function createJobEmitter() {
+  const id  = randomUUID()
+  const job = { events: [], listener: null, done: false }
+  jobs.set(id, job)
+  // Auto-clean after 10 minutes whether or not the client ever connected
+  setTimeout(() => jobs.delete(id), 10 * 60 * 1000)
+
+  const push = obj => {
+    job.events.push(obj)
+    job.listener?.(obj)
+    if (obj.type === 'result' || obj.type === 'error') job.done = true
+  }
+  const emit = {
+    log:       (message, level = 'info') => push({ type: 'log', message, level }),
+    progress:  (pct, label)             => push({ type: 'progress', pct, label }),
+    pipeline:  steps                    => push({ type: 'pipeline', steps }),
+    stepStart: sid                      => push({ type: 'step_start', id: sid }),
+    stepDone:  sid                      => push({ type: 'step_done',  id: sid }),
+    stepError: sid                      => push({ type: 'step_error', id: sid }),
+    result:    data                     => push({ type: 'result', ...data }),
+    error:     message                  => push({ type: 'error', message }),
+    end:       ()                       => {},  // no-op; stream endpoint controls res.end()
+  }
+  return { id, emit }
 }
 
 // ─── Prompts ──────────────────────────────────────────────────────────────────
@@ -282,25 +317,53 @@ app.post('/api/correct', async (req, res) => {
   emit.end()
 })
 
+// POST: validate, start background job, return jobId immediately (beats gateway timeout)
 app.post('/api/correct-audio', async (req, res) => {
-  const emit = openSSE(res)
   const { segments, audioData, audioMimeType, glossary, apiKey, baseUrl: rawBase, model = 'claude-opus-4-7' } = req.body
 
-  if (!apiKey)           { emit.error('API key is required.'); return emit.end() }
-  if (!segments?.length) { emit.error('No segments provided.'); return emit.end() }
-  if (!audioData)        { emit.error('No audio data provided.'); return emit.end() }
+  if (!apiKey)           return res.status(400).json({ error: 'API key is required.' })
+  if (!segments?.length) return res.status(400).json({ error: 'No segments provided.' })
+  if (!audioData)        return res.status(400).json({ error: 'No audio data provided.' })
 
-  // Fail fast with a clear message if the server environment can't handle audio
   const diag = systemDiagnostics()
   if (!diag.audioCapable) {
-    const msg = diag.warnings.join(' | ')
-    emit.error(`Server environment cannot process audio: ${msg}`)
-    return emit.end()
+    return res.status(503).json({ error: `Server cannot process audio: ${diag.warnings.join(' | ')}` })
   }
 
+  const { id: jobId, emit } = createJobEmitter()
+  res.json({ jobId })
+
+  // Run pipeline in background — errors are captured into the job's event buffer
+  runAudioPipeline({ segments, audioData, audioMimeType, glossary, apiKey, baseUrl: rawBase, model }, emit)
+    .catch(err => emit.error(err.message ?? 'Unexpected error'))
+})
+
+// GET: stream job events as SSE — gateways don't apply POST timeouts to long-lived GET streams
+app.get('/api/jobs/:id/stream', (req, res) => {
+  const job = jobs.get(req.params.id)
+  if (!job) return res.status(404).json({ error: 'Job not found or expired.' })
+
+  res.writeHead(200, sseHeaders())
+  res.flushHeaders()
+  const keepalive = setInterval(() => res.write(': ping\n\n'), 5000)
+  const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+  const close = () => { clearInterval(keepalive); res.end() }
+
+  // Replay any events that fired before the client connected
+  for (const event of job.events) send(event)
+  if (job.done) return close()
+
+  job.listener = event => {
+    send(event)
+    if (event.type === 'result' || event.type === 'error') close()
+  }
+
+  req.on('close', () => { clearInterval(keepalive); job.listener = null })
+})
+
+async function runAudioPipeline({ segments, audioData, audioMimeType, glossary, apiKey, baseUrl: rawBase, model }, emit) {
   const baseUrl = rawBase ? rawBase.replace(/\/v1\/messages\/?$/, '') : 'https://api.anthropic.com'
 
-  // Emit an initial skeleton pipeline — chunk counts unknown until after conversion
   emit.pipeline([
     { id: 'read',    label: 'Read audio file' },
     { id: 'convert', label: 'Convert to MP3 (64kbps mono 16kHz)' },
@@ -310,103 +373,93 @@ app.post('/api/correct-audio', async (req, res) => {
     { id: 'done',    label: 'Complete' },
   ])
 
-  try {
-    // Step: read
-    emit.stepStart('read')
-    emit.log(`Audio file received (${audioMimeType})`)
-    emit.progress(2, 'Reading audio…')
-    emit.stepDone('read')
+  // Step: read
+  emit.stepStart('read')
+  emit.log(`Audio file received (${audioMimeType})`)
+  emit.progress(2, 'Reading audio…')
+  emit.stepDone('read')
 
-    // Step: convert
-    emit.stepStart('convert')
-    const mp3Chunks = await convertToMp3Chunks(audioData, audioMimeType ?? 'audio/mpeg', emit)
-    emit.stepDone('convert')
+  // Step: convert
+  emit.stepStart('convert')
+  const mp3Chunks = await convertToMp3Chunks(audioData, audioMimeType ?? 'audio/mpeg', emit)
+  emit.stepDone('convert')
 
-    // Now we know chunk counts — expand the pipeline in place
-    const numClaudeChunks = Math.ceil(segments.length / AUDIO_CHUNK_SIZE)
-    emit.pipeline([
-      { id: 'read',    label: 'Read audio file',                 status: 'done' },
-      { id: 'convert', label: 'Convert to MP3',                  status: 'done' },
-      ...mp3Chunks.map((_, i) => ({
-        id:    `whisper_${i + 1}`,
-        label: `Whisper transcription — chunk ${i + 1} of ${mp3Chunks.length}`,
-      })),
-      { id: 'align', label: 'Align transcripts by timecode' },
-      ...Array.from({ length: numClaudeChunks }, (_, i) => ({
-        id:    `claude_${i + 1}`,
-        label: `Claude comparison — chunk ${i + 1} of ${numClaudeChunks}`,
-      })),
-      { id: 'done', label: 'Complete' },
-    ])
+  // Expand pipeline now that chunk counts are known
+  const numClaudeChunks = Math.ceil(segments.length / AUDIO_CHUNK_SIZE)
+  emit.pipeline([
+    { id: 'read',    label: 'Read audio file',  status: 'done' },
+    { id: 'convert', label: 'Convert to MP3',   status: 'done' },
+    ...mp3Chunks.map((_, i) => ({
+      id:    `whisper_${i + 1}`,
+      label: `Whisper transcription — chunk ${i + 1} of ${mp3Chunks.length}`,
+    })),
+    { id: 'align', label: 'Align transcripts by timecode' },
+    ...Array.from({ length: numClaudeChunks }, (_, i) => ({
+      id:    `claude_${i + 1}`,
+      label: `Claude comparison — chunk ${i + 1} of ${numClaudeChunks}`,
+    })),
+    { id: 'done', label: 'Complete' },
+  ])
 
-    // Steps: whisper
-    const allWhisperSegs = []
-    for (let i = 0; i < mp3Chunks.length; i++) {
-      emit.stepStart(`whisper_${i + 1}`)
-      emit.log(`Transcribing with Whisper (chunk ${i + 1}/${mp3Chunks.length})…`)
-      emit.progress(20 + Math.round(i / mp3Chunks.length * 28), `Whisper: ${i + 1}/${mp3Chunks.length}`)
-
-      const result = await callWhisper(Buffer.from(mp3Chunks[i].data, 'base64'), baseUrl, apiKey)
-      for (const seg of (result.segments ?? [])) {
-        allWhisperSegs.push({ start: seg.start + mp3Chunks[i].startSec, end: seg.end + mp3Chunks[i].startSec, text: seg.text })
-      }
-      emit.stepDone(`whisper_${i + 1}`)
-      emit.log(`Whisper chunk ${i + 1} complete — ${result.segments?.length ?? 0} segments`, 'success')
+  // Steps: whisper
+  const allWhisperSegs = []
+  for (let i = 0; i < mp3Chunks.length; i++) {
+    emit.stepStart(`whisper_${i + 1}`)
+    emit.log(`Transcribing with Whisper (chunk ${i + 1}/${mp3Chunks.length})…`)
+    emit.progress(20 + Math.round(i / mp3Chunks.length * 28), `Whisper: ${i + 1}/${mp3Chunks.length}`)
+    const result = await callWhisper(Buffer.from(mp3Chunks[i].data, 'base64'), baseUrl, apiKey)
+    for (const seg of (result.segments ?? [])) {
+      allWhisperSegs.push({ start: seg.start + mp3Chunks[i].startSec, end: seg.end + mp3Chunks[i].startSec, text: seg.text })
     }
+    emit.stepDone(`whisper_${i + 1}`)
+    emit.log(`Whisper chunk ${i + 1} complete — ${result.segments?.length ?? 0} segments`, 'success')
+  }
+  emit.log(`Whisper transcript ready — ${allWhisperSegs.length} total segments`)
 
-    emit.log(`Whisper transcript ready — ${allWhisperSegs.length} total segments`)
+  // Step: align
+  emit.stepStart('align')
+  emit.progress(50, 'Aligning…')
+  emit.log('Aligning Whisper output with original SRT by timecode…')
+  const aligned = alignWithWhisper(segments, allWhisperSegs)
+  emit.log(`Alignment complete — ${aligned.filter(s => s.whisperText).length}/${aligned.length} segments have Whisper reference`)
+  emit.stepDone('align')
 
-    // Step: align
-    emit.stepStart('align')
-    emit.progress(50, 'Aligning…')
-    emit.log('Aligning Whisper output with original SRT by timecode…')
-    const aligned = alignWithWhisper(segments, allWhisperSegs)
-    const withRef = aligned.filter(s => s.whisperText).length
-    emit.log(`Alignment complete — ${withRef}/${aligned.length} segments have Whisper reference`)
-    emit.stepDone('align')
+  // Steps: claude
+  const clientOpts = { apiKey }
+  if (rawBase) clientOpts.baseURL = baseUrl
+  const client = new Anthropic(clientOpts)
+  const correctedSegments = []
 
-    // Steps: claude
-    const clientOpts = { apiKey }
-    if (rawBase) clientOpts.baseURL = baseUrl
-    const client = new Anthropic(clientOpts)
-    const correctedSegments = []
+  for (let i = 0; i < aligned.length; i += AUDIO_CHUNK_SIZE) {
+    const chunk = aligned.slice(i, i + AUDIO_CHUNK_SIZE)
+    const n = Math.floor(i / AUDIO_CHUNK_SIZE) + 1
+    emit.stepStart(`claude_${n}`)
+    emit.log(`Sending to Claude for comparison (chunk ${n}/${numClaudeChunks}, ${chunk.length} segments)…`)
+    emit.progress(52 + Math.round((n - 1) / numClaudeChunks * 44), `Claude: ${n}/${numClaudeChunks}`)
 
-    for (let i = 0; i < aligned.length; i += AUDIO_CHUNK_SIZE) {
-      const chunk = aligned.slice(i, i + AUDIO_CHUNK_SIZE)
-      const n = Math.floor(i / AUDIO_CHUNK_SIZE) + 1
-      emit.stepStart(`claude_${n}`)
-      emit.log(`Sending to Claude for comparison (chunk ${n}/${numClaudeChunks}, ${chunk.length} segments)…`)
-      emit.progress(52 + Math.round((n - 1) / numClaudeChunks * 44), `Claude: ${n}/${numClaudeChunks}`)
+    const srt = chunk.map(s => {
+      const block = `${s.index}\n${s.timecode}\n${s.text}`
+      return s.whisperText ? `${block}\n[WHISPER: ${s.whisperText}]` : block
+    }).join('\n\n')
 
-      const srt = chunk.map(s => {
-        const block = `${s.index}\n${s.timecode}\n${s.text}`
-        return s.whisperText ? `${block}\n[WHISPER: ${s.whisperText}]` : block
-      }).join('\n\n')
+    const msg = await client.messages.create({
+      model, max_tokens: 8096,
+      system: [{ type: 'text', text: buildAudioSystemPrompt(glossary), cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: `Correct this SRT (chunk ${n}/${numClaudeChunks}):\n\n<srt_with_reference>\n${srt}\n</srt_with_reference>` }],
+    })
 
-      const msg = await client.messages.create({
-        model, max_tokens: 8096,
-        system: [{ type: 'text', text: buildAudioSystemPrompt(glossary), cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: `Correct this SRT (chunk ${n}/${numClaudeChunks}):\n\n<srt_with_reference>\n${srt}\n</srt_with_reference>` }],
-      })
-
-      const match = msg.content[0].text.match(/<srt>([\s\S]*?)<\/srt>/)
-      correctedSegments.push(...applyCorrections(parseSRTSegments((match?.[1] ?? msg.content[0].text).trim()), chunk))
-      emit.stepDone(`claude_${n}`)
-      emit.log(`Claude chunk ${n}/${numClaudeChunks} complete`, 'success')
-    }
-
-    emit.stepStart('done')
-    emit.progress(100, 'Done')
-    emit.log(`All done — ${correctedSegments.length} segments corrected`, 'success')
-    emit.stepDone('done')
-    emit.result({ segments: correctedSegments, whisperSegCount: allWhisperSegs.length })
-  } catch (err) {
-    emit.log(err.message ?? 'Unexpected error', 'error')
-    emit.error(err.message ?? 'Unexpected error')
+    const match = msg.content[0].text.match(/<srt>([\s\S]*?)<\/srt>/)
+    correctedSegments.push(...applyCorrections(parseSRTSegments((match?.[1] ?? msg.content[0].text).trim()), chunk))
+    emit.stepDone(`claude_${n}`)
+    emit.log(`Claude chunk ${n}/${numClaudeChunks} complete`, 'success')
   }
 
-  emit.end()
-})
+  emit.stepStart('done')
+  emit.progress(100, 'Done')
+  emit.log(`All done — ${correctedSegments.length} segments corrected`, 'success')
+  emit.stepDone('done')
+  emit.result({ segments: correctedSegments, whisperSegCount: allWhisperSegs.length })
+}
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 
