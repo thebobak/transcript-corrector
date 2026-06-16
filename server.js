@@ -34,6 +34,10 @@ function openSSE(res) {
     'X-Accel-Buffering':  'no',   // prevent nginx from buffering SSE
   })
   res.flushHeaders()  // force headers through reverse proxies immediately
+
+  // Send a comment ping every 5s to prevent proxy idle-timeout disconnects
+  const keepalive = setInterval(() => res.write(': ping\n\n'), 5000)
+
   const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`)
   return {
     log:       (message, level = 'info') => send({ type: 'log', message, level }),
@@ -44,7 +48,7 @@ function openSSE(res) {
     stepError: id                       => send({ type: 'step_error', id }),
     result:    data                     => send({ type: 'result', ...data }),
     error:     message                  => send({ type: 'error', message }),
-    end:       ()                       => res.end(),
+    end:       ()                       => { clearInterval(keepalive); res.end() },
   }
 }
 
